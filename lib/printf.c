@@ -20,10 +20,23 @@ void kputs(const char *str)
 void kvprintf(const char *fmt, __builtin_va_list args)
 {
     static char buf[1024];
+    unsigned long flags;
 
+    /* Protect the static buffer against concurrent ISR access */
+    __asm__ volatile (
+        "pushfq\n\t"
+        "popq %0\n\t"
+        "cli"
+        : "=m"(flags) :: "memory"
+    );
     vsnprintf(buf, sizeof(buf), fmt, args);
     serial_puts(buf);
     vga_puts(buf);
+    __asm__ volatile (
+        "pushq %0\n\t"
+        "popfq"
+        :: "m"(flags) : "memory"
+    );
 }
 
 /* ---- kprintf — the one you actually call ------------------------------ */

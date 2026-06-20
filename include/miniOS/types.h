@@ -13,11 +13,13 @@ typedef signed int              s32;
 typedef signed long long        s64;
 
 /* Architecture-dependent types (x86_64) */
+#ifndef __MINGW64__          /* MinGW provides its own */
 typedef unsigned long           size_t;
 typedef long                    ssize_t;
 typedef unsigned long           uintptr_t;
 typedef long                    intptr_t;
 typedef long                    ptrdiff_t;
+#endif
 
 /* Boolean */
 typedef enum {

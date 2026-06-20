@@ -30,6 +30,9 @@ void serial_init(void)
 
     /* Enable FIFO, clear them, 14-byte threshold */
     outb(COM1_BASE + 2, 0xC7);
+
+    /* Disable hardware flow control (RTS/CTS), set DTR+RTS low */
+    outb(COM1_BASE + 4, 0x00);
 }
 
 static int serial_tx_empty(void)

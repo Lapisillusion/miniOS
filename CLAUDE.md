@@ -199,24 +199,27 @@ miniOS/
 - [ ] **里程碑: QEMU 启动，VGA 打印 "miniOS booting..."**
 
 ### Phase 1A: Legacy BIOS 引导
-- [ ] `arch/x86_64/boot/bios/mbr.s` — 512B MBR
-- [ ] `arch/x86_64/boot/bios/stage2.s` — 实模式加载器
-- [ ] A20 地址线开启
-- [ ] BIOS int 0x15 E820 内存检测
-- [ ] 临时 GDT 构建
-- [ ] 实模式 → 32 位保护模式
-- [ ] 4 级页表（恒等映射）→ 进入 64 位长模式
-- [ ] 调用 kmain，传递 boot_info_t
-- [ ] **里程碑: 纯手写 BIOS 引导进入 64 位 C 内核**
+- [x] `arch/x86_64/boot/bios/mbr.s` — 512B MBR
+- [x] `arch/x86_64/boot/bios/stage2.s` — 实模式加载器
+- [x] A20 地址线开启
+- [x] BIOS int 0x15 E820 内存检测
+- [x] 临时 GDT 构建
+- [x] 实模式 → 32 位保护模式
+- [x] 4 级页表（恒等映射）→ 进入 64 位长模式
+- [x] 调用 kmain，传递 boot_info_t
+- [x] **里程碑: 纯手写 BIOS 引导进入 64 位 C 内核**
 
 ### Phase 1B: UEFI 引导
-- [ ] `arch/x86_64/boot/uefi/efi.h` — UEFI 类型与协议定义
-- [ ] `arch/x86_64/boot/uefi/efi_main.c` — UEFI 入口
-- [ ] GOP 帧缓冲初始化
-- [ ] 从 ESP 加载内核 ELF
-- [ ] GetMemoryMap → ExitBootServices
-- [ ] 设置页表，进入长模式 → kmain
-- [ ] **里程碑: UEFI 原生引导进入 64 位 C 内核**
+- [x] `arch/x86_64/boot/uefi/efi_main.c` — UEFI bootloader (自包含，仅依赖 efi.h)
+- [x] `arch/x86_64/boot/uefi/entry.s` — 64 位内核入口 stub
+- [x] `linker_uefi.ld` — UEFI 内核链接脚本
+- [x] GOP 帧缓冲初始化
+- [x] 从 ESP 加载 kernel.elf (ELF64 解析 + 段加载 + BSS 清零)
+- [x] GetMemoryMap → 转换到 boot_info_t
+- [x] 4 级页表（含 PML4[511] 高半区映射）→ ExitBootServices → CR3 切换 → kmain
+- [x] **里程碑: UEFI 原生引导** — bootloader 完成, 内核正确加载执行.
+  - **已知问题**: 内核串口无输出. 根因是 UEFI 固件退出后 UART 状态与 serial_init() 不兼容, TX 空闲位永不置位导致死循环. 这是 Phase 2 串口驱动的兼容性 bug, 非引导问题.
+  - **构建方法**: 需要 `gcc-mingw-w64-x86-64` + `binutils-mingw-w64-x86-64`. MinGW GCC 直接编译 PE, 不再依赖 gnu-efi 库或 objcopy 转换.
 
 ### Phase 1C: Multiboot2 引导完善
 - [x] 手写 Multiboot2 头部（magic, architecture, tags）
@@ -506,6 +509,66 @@ mov sp, 0x1000      ← 栈从 0x1000 向下生长
 
 BIOS = 16 位实模式代码。`CR0.PE=1` 之后 `int 0x10`/`int 0x13`/`int 0x15` 全部失效。
 保护模式下读写磁盘必须用 ATA PIO 等硬件驱动（Phase 9）。
+
+---
+
+### 🐞 BUG: UEFI 必须用 MinGW 直接编译 PE，不能走 ELF→objcopy
+
+```
+现象: objcopy -O pei-x86-64 产出的 PE 不被 OVMF 接受 (Unsupported)
+根因: 新版 binutils (2.44+) 移除了 efi-app-x86_64 目标。
+      pei-x86-64 产出的 PE 缺少 IMAGE_FILE_DLL 标志, OVMF 拒绝加载。
+```
+
+**规则**: UEFI bootloader 必须用 MinGW GCC (`x86_64-w64-mingw32-gcc`) 直接编译链接为 PE/COFF。
+安装 `gcc-mingw-w64-x86-64` + `binutils-mingw-w64-x86-64`。
+
+```makefile
+# 正确做法
+x86_64-w64-mingw32-gcc -shared -nostdlib -e efi_main -Wl,--subsystem,10 \
+    -I/usr/include/efi -I/usr/include/efi/x86_64 -Iinclude \
+    -ffreestanding -fno-stack-protector -fshort-wchar -mno-red-zone \
+    efi_main.c -o BOOTX64.EFI
+```
+
+`-nostdlib` 是必须的：不加则 MinGW 自动链接 `-lmsvcrt -lkernel32`，产出的 PE 导入 Windows DLL，UEFI 环境里不存在。
+
+---
+
+### 🐞 BUG: `-mcmodel=kernel` 需要 PML4[511] 高半区映射
+
+```
+现象: UEFI 引导下内核页错误, CR2 = 0xFFFFFFFF80XXXXXX
+根因: 内核用 -mcmodel=kernel 编译, 符号地址在高半区 (0xFFFF_FFFF_8000_0000+).
+      但 UEFI 的页表只有恒等映射 (PML4[0]).
+```
+
+**规则**: UEFI bootloader 构建页表时必须同时设 PML4[0]（恒等）和 PML4[511]（高半区），指向同一个 PDPT。
+
+---
+
+### 🐞 BUG: UEFI ExitBootServices 的 key 失效问题
+
+```
+现象: ExitBootServices 返回 EFI_INVALID_PARAMETER 或 Buffer Too Small
+根因: 在 GetMemoryMap 和 ExitBootServices 之间做了任何 AllocatePool,
+      内存布局改变, map key 失效.
+```
+
+**规则**: 所有 UEFI 内存分配（包括页表）必须在最后一次 GetMemoryMap 之前完成。
+执行顺序：load kernel → 分配页表 → GetMemoryMap（最后一次）→ ExitBootServices（紧接）。
+
+```c
+build_pages();        // 先分配
+GetMemoryMap(..., &key);  // 再取 key
+ExitBootServices(key);    // 立即用, 中间不做任何分配
+```
+
+---
+
+### 🐞 知识: QEMU debug port 0xE9 ≠ serial port
+
+QEMU 的 `-serial stdio` 重定向的是 COM1 (0x3F8)。`outb $0xE9` 输出到 QEMU 的 stderr（调试控制台），与串口完全独立。用 `-serial file:xxx` 抓不到 port 0xE9 的输出。调试时两者不能混淆。
 
 ---
 

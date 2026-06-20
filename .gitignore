@@ -5,6 +5,7 @@ miniOS.iso
 isodir/
 *.bin
 *img
+*.so
 
 # Editor temp files
 *.swp

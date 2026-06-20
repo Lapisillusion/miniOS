@@ -74,7 +74,10 @@ else ifeq ($(BOOT_METHOD),multiboot2)
     LDSCRIPT      := linker.ld
     KERNEL_BIN    :=
 else ifeq ($(BOOT_METHOD),uefi)
-    $(error UEFI boot not yet implemented)
+    BOOT_ASM_OBJS := arch/x86_64/boot/uefi/entry.o
+    BOOT_C_OBJS   :=
+    LDSCRIPT      := linker_uefi.ld
+    KERNEL_BIN    :=
 endif
 
 OBJS := $(BOOT_ASM_OBJS) $(BOOT_C_OBJS) $(CORE_C_OBJS) $(CORE_ASM_OBJS)
@@ -84,12 +87,14 @@ LDFLAGS := -nostdlib -T $(LDSCRIPT) -z max-page-size=0x1000
 # ---------------------------------------------------------------------------
 # Top-level targets
 # ---------------------------------------------------------------------------
-.PHONY: all iso disk run clean
+.PHONY: all iso disk efi run clean
 
 all: kernel.elf
 
 ifeq ($(BOOT_METHOD),bios)
 all: kernel.bin
+else ifeq ($(BOOT_METHOD),uefi)
+all: efi
 endif
 
 # ---------------------------------------------------------------------------
@@ -155,6 +160,33 @@ disk.img: arch/x86_64/boot/bios/mbr.bin \
 disk: disk.img
 
 # ---------------------------------------------------------------------------
+# UEFI bootloader  (UEFI only)
+# ---------------------------------------------------------------------------
+UEFI_CC   := x86_64-w64-mingw32-gcc
+UEFI_FLAGS := -I/usr/include/efi -I/usr/include/efi/x86_64 \
+              -Iinclude -Iarch/x86_64/include \
+              -ffreestanding -fno-stack-protector -fshort-wchar \
+              -mno-red-zone -O0 -g -Wall -Wextra
+
+BOOTX64.EFI: arch/x86_64/boot/uefi/efi_main.c
+	@mkdir -p $(dir $@)
+	$(UEFI_CC) -shared -e efi_main -Wl,--subsystem,10 \
+		$(UEFI_FLAGS) $< -o $@
+	@echo "  [EFI]  BOOTX64.EFI ready"
+
+uefi_disk.img: BOOTX64.EFI kernel.elf
+	@echo "  [EFI]  Building UEFI boot disk..."
+	dd if=/dev/zero of=$@ bs=1M count=64 status=none
+	mkfs.fat -F 32 $@ >/dev/null 2>&1
+	mmd -i $@ ::/EFI
+	mmd -i $@ ::/EFI/BOOT
+	mcopy -i $@ BOOTX64.EFI ::/EFI/BOOT/BOOTX64.EFI
+	mcopy -i $@ kernel.elf ::/
+	@echo "  [EFI]  uefi_disk.img ready"
+
+efi: uefi_disk.img
+
+# ---------------------------------------------------------------------------
 # ISO image  (Multiboot2 only)
 # ---------------------------------------------------------------------------
 iso: kernel.elf
@@ -187,6 +219,17 @@ run: iso
 		-no-reboot \
 		-no-shutdown \
 		-m 256M
+else ifeq ($(BOOT_METHOD),uefi)
+run: efi
+	@cp /usr/share/OVMF/OVMF_VARS_4M.fd OVMF_VARS.fd 2>/dev/null || true
+	qemu-system-x86_64 \
+		-drive if=pflash,format=raw,readonly=on,file=/usr/share/OVMF/OVMF_CODE_4M.fd \
+		-drive if=pflash,format=raw,file=OVMF_VARS.fd \
+		-drive format=raw,file=uefi_disk.img \
+		-serial stdio \
+		-no-reboot \
+		-no-shutdown \
+		-m 256M
 endif
 
 # ---------------------------------------------------------------------------
@@ -196,6 +239,17 @@ run-debug:
 ifeq ($(BOOT_METHOD),bios)
 	qemu-system-x86_64 \
 		-drive format=raw,file=disk.img \
+		-serial stdio \
+		-no-reboot \
+		-no-shutdown \
+		-m 256M \
+		-s -S
+else ifeq ($(BOOT_METHOD),uefi)
+	@cp /usr/share/OVMF/OVMF_VARS_4M.fd OVMF_VARS.fd 2>/dev/null || true
+	qemu-system-x86_64 \
+		-drive if=pflash,format=raw,readonly=on,file=/usr/share/OVMF/OVMF_CODE_4M.fd \
+		-drive if=pflash,format=raw,file=OVMF_VARS.fd \
+		-drive format=raw,file=uefi_disk.img \
 		-serial stdio \
 		-no-reboot \
 		-no-shutdown \
@@ -223,8 +277,11 @@ debug:
 # ---------------------------------------------------------------------------
 clean:
 	rm -rf kernel.elf kernel.bin miniOS.iso disk.img isodir
+	rm -rf uefi_disk uefi_disk.img OVMF_VARS.fd
+	rm -f BOOTX64.EFI
 	rm -f arch/x86_64/boot/bios/mbr.bin
 	rm -f arch/x86_64/boot/bios/stage2.bin
 	rm -f arch/x86_64/boot/bios/head64.o
+	rm -f arch/x86_64/boot/uefi/efi_main.o
 	find . -name '*.o' -delete
 	@echo "  [CLEAN] done"
