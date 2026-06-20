@@ -1,0 +1,62 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "miniOS (QEMU + GDB)",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/kernel.elf",
+            "cwd": "${workspaceFolder}",
+            "MIMode": "gdb",
+            "miDebuggerPath": "/usr/bin/gdb",
+            "miDebuggerServerAddress": "localhost:1234",
+            "stopAtConnect": true,
+            "hardwareBreakpoints": {
+                "require": false,
+                "limit": 32
+            },
+            "setupCommands": [
+                {
+                    "description": "Enable pretty-printing",
+                    "text": "-enable-pretty-printing",
+                    "ignoreFailures": true
+                },
+                {
+                    "description": "Allow pending breakpoints (set before target connected)",
+                    "text": "set breakpoint pending on",
+                    "ignoreFailures": false
+                },
+                {
+                    "description": "Set disassembly to AT&T syntax",
+                    "text": "set disassembly-flavor att",
+                    "ignoreFailures": true
+                },
+                {
+                    "description": "Print complete frame info",
+                    "text": "set print frame-arguments all",
+                    "ignoreFailures": true
+                },
+                {
+                    "description": "Use hardware breakpoints by default for kernel code",
+                    "text": "set can-use-hw-watchpoints 1",
+                    "ignoreFailures": true
+                },
+                {
+                    "description": "Don't confirm operations",
+                    "text": "set confirm off",
+                    "ignoreFailures": true
+                },
+                {
+                    "description": "Pagination off (needed for MI mode)",
+                    "text": "set pagination off",
+                    "ignoreFailures": true
+                }
+            ],
+            "sourceFileMap": {
+                "/home/lapis/projects/miniOS": "${workspaceFolder}"
+            },
+            "externalConsole": false,
+            "preLaunchTask": "make kernel.elf"
+        }
+    ]
+}

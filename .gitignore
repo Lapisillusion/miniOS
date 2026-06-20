@@ -1,0 +1,30 @@
+# miniOS — build artifacts
+kernel.elf
+miniOS.iso
+*.o
+isodir/
+
+# Editor temp files
+*.swp
+*.swo
+*~
+\#*\#
+.#*
+
+# VSCode — keep launch.json/tasks.json, ignore workspace settings
+.vscode/settings.json
+.vscode/*.log
+
+# Code navigation
+tags
+cscope.*
+GPATH
+GRTAGS
+GSYMS
+
+# macOS
+.DS_Store
+
+# C object dumps (debugging)
+*.dump
+*.lst

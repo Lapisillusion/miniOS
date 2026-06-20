@@ -1,0 +1,72 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "make kernel.elf",
+            "type": "shell",
+            "command": "make",
+            "args": [
+                "kernel.elf"
+            ],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "shared",
+                "showReuseMessage": true,
+                "clear": false
+            },
+            "problemMatcher": {
+                "owner": "cpp",
+                "fileLocation": [
+                    "relative",
+                    "${workspaceFolder}"
+                ],
+                "pattern": {
+                    "regexp": "^(.*):(\\d+):(\\d+):\\s+(warning|error):\\s+(.*)$",
+                    "file": 1,
+                    "line": 2,
+                    "column": 3,
+                    "severity": 4,
+                    "message": 5
+                }
+            }
+        },
+        {
+            "label": "make + ISO",
+            "type": "shell",
+            "command": "make",
+            "args": [
+                "iso"
+            ],
+            "group": "build",
+            "problemMatcher": []
+        },
+        {
+            "label": "Start QEMU (debug mode)",
+            "type": "shell",
+            "command": "make",
+            "args": [
+                "run-debug"
+            ],
+            "isBackground": true,
+            "problemMatcher": {
+                "pattern": {
+                    "regexp": "^(.*)$",
+                    "file": 1,
+                    "location": 1,
+                    "message": 1
+                },
+                "background": {
+                    "activeOnStart": true,
+                    "beginsPattern": "^.*QEMU.*waiting.*",
+                    "endsPattern": "^.*$"
+                }
+            }
+        }
+    ]
+}

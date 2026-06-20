@@ -1,0 +1,400 @@
+# miniOS Development Guide
+
+## Project Overview
+
+miniOS 是一个从零开始实现的小型操作系统内核，目标是在虚拟机（QEMU）中完成自举引导，加载内核，初始化核心子系统，并最终支持进程/线程调度、文件系统和一个可交互的 Shell。
+
+**核心特点**: 手写所有引导代码，覆盖 3 种引导方式（BIOS / Multiboot2 / UEFI），不依赖任何现成的 bootloader。目录结构模仿 Linux 内核的组织方式。
+
+## Architecture Decisions
+
+| 决策项 | 选择 | 原因 |
+|--------|------|------|
+| 目标架构 | x86_64 (AMD64) | 文档丰富，QEMU 支持完善，是现代 PC 的标准架构 |
+| 编程语言 | C (GNU99) + AT&T 汇编 | C 是内核开发的事实标准；AT&T 语法与 GCC 内联汇编一致 |
+| 工具链 | GCC 交叉编译器 (x86_64-elf) | 避免依赖宿主系统的编译设置 |
+| 构建系统 | GNU Make | 简单直接，适合内核项目规模 |
+| 文件系统 | 自定义简单 FS（类 ext2 简化版） | 比 FAT 更简洁，便于学习核心概念 |
+| 可执行格式 | ELF64 | x86_64 原生格式 |
+
+## Three Boot Methods
+
+本项目手写全部 3 种引导方式，通过 Makefile 变量切换：
+
+### 1. Legacy BIOS（手写完整 bootloader）
+- 第一阶段: 手写 512 字节 MBR 引导扇区（实模式，BIOS 加载到 0x7C00）
+- 第二阶段: 手写 Stage2 loader（实模式 → 读取磁盘扇区 → 加载内核到内存）
+- 模式切换: 实模式 → 32 位保护模式（设置 GDT）→ 64 位长模式
+- 优点: 理解整个启动流程的每一个细节
+
+### 2. UEFI（手写 UEFI 应用）
+- 使用 POSIX-UEFI 或纯 EFI 头编写 UEFI 应用
+- 使用 GOP 获取帧缓冲
+- 利用 UEFI 的 `LoadImage` / `StartImage` 或直接加载内核
+- ExitBootServices → 接管控制权进入内核
+- 优点: 了解现代固件接口
+
+### 3. Multiboot2（GRUB 作为载体，我们手写协议适配层）
+- 手写 Multiboot2 头部结构体
+- GRUB 负责加载，但内核需要解析 Multiboot2 信息结构体获取内存映射等
+- 优点: 最简单的实现路径，快速验证功能
+
+**构建时**通过 `BOOT_METHOD=bios|uefi|multiboot2` 切换。
+
+## Development Environment
+
+### 必需工具
+```bash
+# Ubuntu/Debian
+sudo apt install build-essential bison flex libgmp3-dev libmpc-dev libmpfr-dev texinfo \
+                 qemu-system-x86 xorriso nasm mtools gdisk
+
+# 交叉编译器 (tools/build-toolchain.sh)
+```
+
+### 测试运行
+```bash
+make BOOT_METHOD=multiboot2 run   # 最快验证路径
+make BOOT_METHOD=bios run
+make BOOT_METHOD=uefi run
+make debug                         # GDB 调试
+```
+
+## Directory Structure
+
+```
+miniOS/
+├── CLAUDE.md
+├── README.md
+├── Makefile                    # 顶层构建
+├── Kconfig                     # (未来) 配置系统
+├── linker.ld                   # 内核链接脚本
+│
+├── arch/                       # 架构相关代码
+│   └── x86_64/
+│       ├── Makefile            # 架构级构建规则
+│       ├── boot/               # 架构特定引导代码
+│       │   ├── bios/           # Legacy BIOS 引导
+│       │   │   ├── mbr.s       #   第一阶段: 512B MBR
+│       │   │   ├── stage2.s    #   第二阶段: 实模式 loader
+│       │   │   ├── a20.s       #   A20 地址线
+│       │   │   └── mode_switch.s # 实模式→保护→长模式
+│       │   ├── uefi/           # UEFI 引导
+│       │   │   ├── efi_main.c  #   UEFI 入口点
+│       │   │   ├── efi.h       #   UEFI 类型/协议定义
+│       │   │   └── loader.c    #   内核 ELF 加载
+│       │   ├── multiboot2/     # Multiboot2 引导
+│       │   │   ├── header.s    #   Multiboot2 头部
+│       │   │   └── parse.c     #   mb2 信息结构解析
+│       │   └── Makefile
+│       ├── kernel/             # 架构特定内核代码
+│       │   ├── gdt.c           #   全局描述符表
+│       │   ├── idt.c           #   中断描述符表
+│       │   ├── isr.c           #   异常处理入口
+│       │   ├── isr_handlers.s  #   ISR 汇编存根
+│       │   ├── irq.c           #   IRQ + 8259 PIC
+│       │   ├── syscall.c       #   syscall/sysret 框架
+│       │   ├── switch.s        #   上下文切换
+│       │   └── head.s          #   早期启动汇编（长模式入口）
+│       ├── mm/                 # 架构特定内存管理
+│       │   ├── paging.c        #   页表操作 (4-level)
+│       │   └── tlb.c           #   TLB 刷新
+│       └── include/            # 架构特定头文件
+│           └── asm/            #   <asm/xxx.h> → arch/x86_64/include/asm/
+│               ├── gdt.h
+│               ├── idt.h
+│               ├── paging.h
+│               └── io.h        #   inb/outb 等
+│
+├── init/                       # 内核初始化
+│   ├── main.c                  #   kmain() — 内核入口
+│   └── start_kernel.c          #   子系统初始化序列
+│
+├── kernel/                     # 核心内核（架构无关）
+│   ├── sched/                  #   调度器
+│   │   └── sched.c
+│   ├── proc/                   #   进程/线程管理
+│   │   ├── process.c
+│   │   └── thread.c
+│   └── sys/                    #   系统调用实现
+│       └── syscall.c
+│
+├── mm/                         # 核心内存管理
+│   ├── pmm.c                   #   物理内存管理器
+│   ├── vmm.c                   #   虚拟内存管理器
+│   └── heap.c                  #   内核堆 (kmalloc/kfree)
+│
+├── fs/                         # 文件系统
+│   ├── vfs.c                   #   VFS 层
+│   └── minifs/                 #   minifs 实现
+│       ├── super.c             #     超级块
+│       ├── inode.c             #     inode 操作
+│       └── dir.c               #     目录操作
+│
+├── drivers/                    # 设备驱动
+│   ├── vga/                    #   VGA 文本模式
+│   │   └── vga.c
+│   ├── serial/                 #   串口输出
+│   │   └── serial.c
+│   ├── keyboard/               #   PS/2 键盘
+│   │   └── keyboard.c
+│   ├── timer/                  #   PIT 定时器
+│   │   └── pit.c
+│   └── ata/                    #   ATA PIO 磁盘驱动
+│       └── ata.c
+│
+├── include/                    # 内核公共头文件
+│   ├── miniOS/                 #   核心类型与宏
+│   │   ├── types.h             #     u8, u16, u32, u64, size_t ...
+│   │   ├── kernel.h            #     KERN_xxx 宏, container_of ...
+│   │   ├── boot_info.h         #     统一引导信息结构
+│   │   └── compiler.h          #     __packed, __aligned, likely/unlikely
+│   ├── kernel/                 #   内核子系统头文件
+│   │   ├── sched.h
+│   │   └── proc.h
+│   ├── mm/                     #   内存管理头文件
+│   │   ├── pmm.h
+│   │   ├── vmm.h
+│   │   └── heap.h
+│   ├── fs/                     #   文件系统头文件
+│   │   └── vfs.h
+│   └── drivers/                #   驱动头文件
+│       ├── vga.h
+│       ├── serial.h
+│       └── keyboard.h
+│
+├── lib/                        # 内核库
+│   ├── string.c                #   memcpy, memset, strlen ...
+│   ├── printf.c                #   格式化输出
+│   └── vsprintf.c              #   格式化核心
+│
+├── usr/                        # 用户空间（对应 Linux usr/）
+│   ├── init/                   #   init 进程
+│   ├── shell/                  #   miniOS Shell
+│   ├── programs/               #   用户程序 (cat, ls, echo)
+│   └── libc/                   #   简易 C 库
+│       ├── syscall.s           #     syscall 指令封装
+│       ├── stdio.c
+│       ├── stdlib.c
+│       └── string.c
+│
+├── scripts/                    # 辅助脚本
+│   ├── build-disk.sh           #   磁盘镜像构建
+│   └── grub.cfg                #   Multiboot2 模式 GRUB 配置
+│
+└── tools/                      # 工具
+    └── build-toolchain.sh      #   交叉编译器构建脚本
+```
+
+## Development Phases
+
+### Phase 0: 开发环境搭建
+- [ ] 工具链确认（x86_64-elf 交叉编译器 或 系统 GCC + freestanding）
+- [ ] 目录结构搭建
+- [ ] 链接脚本 linker.ld
+- [ ] 最小 Multiboot2 内核（验证构建链 + QEMU 启动）
+- [ ] 顶层 Makefile
+- [ ] `include/miniOS/types.h` — 基础类型定义
+- [ ] `include/miniOS/boot_info.h` — 统一引导信息结构体
+- [ ] **里程碑: QEMU 启动，VGA 打印 "miniOS booting..."**
+
+### Phase 1A: Legacy BIOS 引导
+- [ ] `arch/x86_64/boot/bios/mbr.s` — 512B MBR
+- [ ] `arch/x86_64/boot/bios/stage2.s` — 实模式加载器
+- [ ] A20 地址线开启
+- [ ] BIOS int 0x15 E820 内存检测
+- [ ] 临时 GDT 构建
+- [ ] 实模式 → 32 位保护模式
+- [ ] 4 级页表（恒等映射）→ 进入 64 位长模式
+- [ ] 调用 kmain，传递 boot_info_t
+- [ ] **里程碑: 纯手写 BIOS 引导进入 64 位 C 内核**
+
+### Phase 1B: UEFI 引导
+- [ ] `arch/x86_64/boot/uefi/efi.h` — UEFI 类型与协议定义
+- [ ] `arch/x86_64/boot/uefi/efi_main.c` — UEFI 入口
+- [ ] GOP 帧缓冲初始化
+- [ ] 从 ESP 加载内核 ELF
+- [ ] GetMemoryMap → ExitBootServices
+- [ ] 设置页表，进入长模式 → kmain
+- [ ] **里程碑: UEFI 原生引导进入 64 位 C 内核**
+
+### Phase 1C: Multiboot2 引导完善
+- [ ] 手写 Multiboot2 头部（magic, architecture, tags）
+- [ ] 解析 Multiboot2 信息结构体
+- [ ] 提取内存映射 / 帧缓冲 / 模块信息
+- [ ] 填充 boot_info_t → kmain
+- [ ] **里程碑: Multiboot2 引导信息完整解析**
+
+### Phase 2: 终端与调试输出
+- [ ] `drivers/vga/vga.c` — VGA 文本模式 (80x25)
+- [ ] `drivers/serial/serial.c` — 串口 COM1 (0x3F8)
+- [ ] `lib/printf.c` — 基础格式化输出
+- [ ] `init/start_kernel.c` — 子系统初始化序列
+- [ ] **里程碑: 完整的终端输出和调试能力**
+
+### Phase 3: 中断系统
+- [ ] `arch/x86_64/kernel/idt.c` — IDT 初始化
+- [ ] `arch/x86_64/kernel/isr.c` + `isr_handlers.s` — 异常 ISR
+- [ ] `arch/x86_64/kernel/irq.c` — 8259 PIC 重映射 + IRQ 分发
+- [ ] `drivers/timer/pit.c` — PIT 定时器
+- [ ] `drivers/keyboard/keyboard.c` — PS/2 键盘
+- [ ] **里程碑: 可捕获异常，定时器滴答，按键响应**
+
+### Phase 4: 物理内存管理
+- [ ] `mm/pmm.c` — 位图物理页分配器
+- [ ] 从 boot_info 获取内存布局
+- [ ] pmm_alloc_page / pmm_free_page
+- [ ] **里程碑: 可分配和释放物理页**
+
+### Phase 5: 虚拟内存与分页
+- [ ] `arch/x86_64/mm/paging.c` — 4 级页表操作
+- [ ] `mm/vmm.c` — 虚拟地址空间管理
+- [ ] 恒等映射 → 高阶内核映射
+- [ ] **里程碑: 分页启用，内核工作在高半区虚拟地址**
+
+### Phase 6: 内核堆
+- [ ] `mm/heap.c` — kmalloc / kfree
+- [ ] **里程碑: 内核动态内存分配**
+
+### Phase 7: 进程与线程
+- [ ] `kernel/proc/process.c` — PCB
+- [ ] `kernel/proc/thread.c` — TCB
+- [ ] `arch/x86_64/kernel/switch.s` — 上下文切换
+- [ ] `kernel/sched/sched.c` — Round-Robin 调度器
+- [ ] **里程碑: 多个内核线程并发执行**
+
+### Phase 8: 用户模式
+- [ ] `arch/x86_64/kernel/gdt.c` — Ring 3 段 + TSS
+- [ ] `arch/x86_64/kernel/syscall.c` — syscall/sysret
+- [ ] 用户进程创建与 Ring 3 切换
+- [ ] 基础系统调用: write, read, exit
+- [ ] **里程碑: 用户态进程运行，可发起系统调用**
+
+### Phase 9: 磁盘与文件系统
+- [ ] `drivers/ata/ata.c` — ATA PIO 磁盘驱动
+- [ ] `fs/minifs/` — 自定义文件系统
+- [ ] `fs/vfs.c` — VFS 层
+- [ ] 文件描述符表
+- [ ] **里程碑: 可读写文件**
+
+### Phase 10: ELF 加载器
+- [ ] ELF64 解析与加载
+- [ ] 用户地址空间建立
+- [ ] 跳转用户入口点
+- [ ] **里程碑: 从文件系统加载并运行 ELF 程序**
+
+### Phase 11: Shell & 用户程序
+- [ ] `usr/shell/` — 简易 Shell
+- [ ] `usr/programs/` — cat, ls, echo
+- [ ] `usr/init/` — init 进程
+- [ ] `usr/libc/` — 简易 libc
+- [ ] **里程碑: 交互式 Shell，可执行命令**
+
+### Phase 12: 完善
+- [ ] fork (Copy-on-Write)
+- [ ] 管道
+- [ ] 更多用户程序
+- [ ] README 文档
+
+## Boot Flow
+
+### BIOS Boot Flow
+```
+Power-on / BIOS
+  → POST
+  → BIOS 加载 MBR (512B) 到 0x7C00
+  → [mbr.s] 设置段, 加载 stage2
+  → [stage2.s] int 0x13 读磁盘 → 加载内核
+  → [stage2.s] int 0x15 E820 → 内存映射
+  → A20 enable
+  → 加载 32-bit GDT → CR0.PE=1 → 保护模式
+  → 构建 PML4 → EFER.LME=1 → CR0.PG=1 → 长模式
+  → 加载 64-bit GDT → 远跳转 → kmain(boot_info_t*)
+```
+
+### UEFI Boot Flow
+```
+Power-on / UEFI
+  → DXE → BDS → 选中 miniOS.efi
+  → [efi_main] SystemTable, BootServices
+  → GOP → 帧缓冲
+  → 从 ESP 加载内核 ELF
+  → GetMemoryMap
+  → ExitBootServices
+  → 页表 + 长模式 → kmain(boot_info_t*)
+```
+
+### Multiboot2 Boot Flow
+```
+Power-on / BIOS / UEFI
+  → GRUB 解析 multiboot2 header
+  → GRUB 加载内核到内存
+  → [header.s] 从 GRUB 接管控制权
+  → 解析 mb2 info struct
+  → 填充 boot_info_t → kmain(boot_info_t*)
+```
+
+## Common Boot Info Structure
+
+3 种引导路径向 kmain 传递统一的结构体：
+
+```c
+/* include/miniOS/boot_info.h */
+typedef struct {
+    void     *framebuffer_addr;
+    uint32_t  framebuffer_width;
+    uint32_t  framebuffer_height;
+    uint32_t  framebuffer_pitch;
+    uint8_t   framebuffer_bpp;
+
+    struct {
+        uint64_t base;
+        uint64_t length;
+        uint32_t type;   /* 1=usable, 2=reserved, 3=ACPI reclaim, 4=ACPI NVS, 5=bad */
+    } memory_map[128];
+    uint32_t  memory_map_count;
+
+    uint64_t  kernel_phys_base;
+    uint64_t  kernel_size;
+} boot_info_t;
+```
+
+## Coding Conventions
+
+### C 代码风格
+- **标准**: C99 (GNU99)，`-ffreestanding -nostdlib`
+- **缩进**: Tab（Linux 风格），8 字符宽
+- **行宽**: 80 字符
+- **命名**:
+  - 函数: `snake_case` (`pmm_alloc_page`, `vfs_open`)
+  - 全局变量: `g_` 前缀 (`g_kernel_pml4`, `g_tick_count`)
+  - 常量/宏: `UPPER_SNAKE_CASE` (`PAGE_SIZE`, `KERNEL_VMA`)
+  - 结构体: `_t` 后缀 (`process_t`, `inode_t`, `page_t`)
+  - typedef: 对基本类型使用 (`typedef unsigned long size_t;`)
+- **include guard**: `#ifndef _MINIOS_PMM_H` / `#define _MINIOS_PMM_H` / `#endif`
+- **注释**: 英文，函数用 `/**` Doxygen 风格
+
+### 汇编代码风格
+- **语法**: AT&T (GAS) 为主，`.intel_syntax noprefix` 在必要时可用
+- **缩进**: 标签顶格，指令缩进 Tab
+- **注释**: `#` 开头
+
+### Kernel Build Flags
+```makefile
+KBUILD_CFLAGS   := -std=gnu99 -ffreestanding -O2 -Wall -Wextra \
+                    -nostdinc -nostdlib -fno-stack-protector \
+                    -mno-red-zone -mcmodel=kernel -mno-mmx -mno-sse \
+                    -mno-sse2 -mno-80387 -mgeneral-regs-only
+KBUILD_AFLAGS   := -nostdinc -nostdlib
+KBUILD_LDFLAGS  := -nostdlib -T linker.ld -z max-page-size=0x1000
+```
+
+## Key Design Principles
+
+1. **渐进式开发**: 每完成一个 Phase 立即在 QEMU 中验证
+2. **简单优先**: 先用最简实现（bitmap PMM, Round-Robin 调度），后续迭代
+3. **调试先行**: 优先打通串口/ VGA 输出，kpanic 走在崩溃前面
+4. **模块化**: 子系统通过 include/ 中的头文件接口通信
+5. **统一引导信息**: 3 种引导最终给 kmain 同一套 boot_info_t
+6. **失败即停止**: `kpanic()` + `kassert()`，不静默吞错误
+7. **Linux 风格目录**: arch/ kernel/ mm/ fs/ drivers/ include/ init/ lib/ usr/
