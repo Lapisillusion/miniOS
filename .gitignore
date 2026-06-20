@@ -3,6 +3,8 @@ kernel.elf
 miniOS.iso
 *.o
 isodir/
+*.bin
+*img
 
 # Editor temp files
 *.swp

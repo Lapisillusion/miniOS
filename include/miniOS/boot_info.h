@@ -11,12 +11,11 @@
 #define MEM_TYPE_ACPI_NVS    4
 #define MEM_TYPE_BAD         5
 
-/* Memory map entry */
+/* Memory map entry — exactly 20 bytes, matches BIOS E820 format */
 typedef struct {
     u64 base;
     u64 length;
     u32 type;
-    u32 __pad;
 } __packed memory_map_entry_t;
 
 /*

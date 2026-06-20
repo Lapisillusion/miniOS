@@ -389,6 +389,123 @@ KBUILD_AFLAGS   := -nostdinc -nostdlib
 KBUILD_LDFLAGS  := -nostdlib -T linker.ld -z max-page-size=0x1000
 ```
 
+## ⚠️ HARD-EARNED LESSONS — READ BEFORE WRITING BOOT CODE
+
+> 以下每个坑都导致过实际的调试困局。违反即挂，没有警告。
+
+### 🐞 BUG: 硬编码扇区数导致磁盘越界读
+
+```
+现象: int 0x13 返回后 CPU 挂起，不设 CF，不打印 err。
+根因: KERNEL_SECTORS 写死 128，但 disk.img 只有 ~26 扇区。
+      BIOS 试图读不存在的扇区，DMA 挂起永不返回。
+```
+
+**规则**: 扇区数必须由构建系统根据 `kernel.bin` 实际大小动态计算，**禁止硬编码**。
+
+```makefile
+# Makefile — 正确做法
+nasm -dKERNEL_SECTORS=$(shell echo $$(( ($$(stat -c%s kernel.bin) + 511) / 512 )))
+```
+
+**同时** `disk.img` 中的 kernel 必须补齐到扇区边界，确保读请求不超磁盘物理大小。
+
+---
+
+### 🐞 BUG: A20 未开启就访问 1MB 以上地址
+
+```
+现象: 内核被静默写到地址 0 而不是 1MB，覆盖 IVT+BDA，CPU 崩溃。
+根因: 实模式下 A20 关闭时 bit 20 强制为 0。
+      0x100000 → 绕回 0x000000。
+```
+
+**规则**: 执行顺序必须是 **先开 A20，后访问 1MB+**。`enable_a20` 必须放在 `load_kernel` 之前，无一例外。
+
+```
+✅ 正确:    开 A20 → 读磁盘到 1MB
+❌ 错误:    读磁盘到 1MB → 开 A20  (内核覆盖中断向量表)
+```
+
+---
+
+### 🐞 BUG: BIOS int 0x13 的缓冲区用高段址
+
+```
+现象: int 0x13 不返回，单步调试走不过去。
+根因: DAP 中 segment=0xFFF0 或 0xFFFF 这类极值。
+      SeaBIOS 的地址检查逻辑对 HMA 边界处理有缺陷。
+```
+
+**规则**: **永远不要让 BIOS 中断的缓冲区落在 0x100000 以上**。
+实模式 I/O 目标地址只允许常规内存（0x00000 - 0x9FFFF）。
+
+```
+✅ 正确:    DAP segment=0x07E0, offset=0    → 物理 0x7E00 (常规内存)
+❌ 错误:    DAP segment=0xFFF0, offset=0x1000 → 物理 0x100000 (HMA)
+```
+
+**正确流程**: 实模式读到低地址 → 保护模式 `rep movsd` 搬到 1MB+。
+
+---
+
+### 🐞 BUG: 注意互不兼容的汇编语法
+
+```
+GAS (.s 文件):
+  注释 #      寄存器 %rax      源在前 mov $1, %rax    .intel_syntax 可切换
+
+NASM (.s 文件, -f bin):
+  注释 ;      寄存器 rax       目的在前 mov rax, 1    [ORG] 设定基址
+```
+
+**混用后果**: GAS 把 `;` 后面的所有内容当指令，抛出一堆 "no such instruction"。
+
+---
+
+### 🐞 BUG: objcopy 丢弃 BSS，必须手动清零
+
+```
+kernel.elf → objcopy -O binary → kernel.bin
+BSS 不在 binary 里！全局未初始化变量是磁盘上的随机值。
+```
+
+**规则**: 任何引导路径的 64 位入口（head64.s / bios64_entry）必须在调用第一个 C 函数前用 `rep stosq` 清零 BSS。
+
+---
+
+### 🐞 BUG: 实模式栈与代码区重叠
+
+```
+[ORG 0x1000]        ← 代码从 0x1000 向上
+mov sp, 0x1000      ← 栈从 0x1000 向下生长
+```
+
+如果代码超过栈的初始偏移，`push` 会踩到代码。给代码留够空间，或把栈设到代码区之前的安全地址。
+
+---
+
+### 🐞 BUG: 加载内核到低地址时注意不与页表重叠
+
+```
+当前布局 (stage2):
+  0x7E00  内核暂存区  (最大 ~560KB)
+  0xB000  PML4        (4KB)
+  0xC000  PDPT        (4KB)
+  0xD000  PD          (4KB)
+```
+
+内核长度超过 `0xB000 - 0x7E00 = 0x3200 (12.5KB)` 就会覆盖页表。未来扩容时注意检查这个边界。
+
+---
+
+### 🐞 知识: 保护模式/长模式下不能调 BIOS 中断
+
+BIOS = 16 位实模式代码。`CR0.PE=1` 之后 `int 0x10`/`int 0x13`/`int 0x15` 全部失效。
+保护模式下读写磁盘必须用 ATA PIO 等硬件驱动（Phase 9）。
+
+---
+
 ## Key Design Principles
 
 1. **渐进式开发**: 每完成一个 Phase 立即在 QEMU 中验证
