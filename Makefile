@@ -58,7 +58,7 @@ ifeq ($(BOOT_METHOD),bios)
     KERNEL_BIN    := kernel.bin
 else ifeq ($(BOOT_METHOD),multiboot2)
     BOOT_ASM_OBJS := arch/x86_64/boot/multiboot2/header.o
-    BOOT_C_OBJS   :=
+    BOOT_C_OBJS   := init/mb2_init.o
     LDSCRIPT      := linker.ld
     KERNEL_BIN    :=
 else ifeq ($(BOOT_METHOD),uefi)

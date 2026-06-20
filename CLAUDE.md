@@ -219,11 +219,11 @@ miniOS/
 - [ ] **里程碑: UEFI 原生引导进入 64 位 C 内核**
 
 ### Phase 1C: Multiboot2 引导完善
-- [ ] 手写 Multiboot2 头部（magic, architecture, tags）
-- [ ] 解析 Multiboot2 信息结构体
-- [ ] 提取内存映射 / 帧缓冲 / 模块信息
-- [ ] 填充 boot_info_t → kmain
-- [ ] **里程碑: Multiboot2 引导信息完整解析**
+- [x] 手写 Multiboot2 头部（magic, architecture, tags）
+- [x] 解析 Multiboot2 信息结构体
+- [x] 提取内存映射 / 帧缓冲 / 模块信息
+- [x] 填充 boot_info_t → kmain
+- [x] **里程碑: Multiboot2 引导信息完整解析**
 
 ### Phase 2: 终端与调试输出
 - [ ] `drivers/vga/vga.c` — VGA 文本模式 (80x25)

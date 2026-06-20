@@ -185,12 +185,9 @@ _start64:
     movq $stack_top, %rsp
     movq $stack_top, %rbp
 
-    # Prepare boot_info pointer (rdi = first argument to kmain)
-    # We expose the full mb2 info pointer — later phases will parse it
-    movq $mb2_info_ptr, %rdi
-
-    # Call the C kernel entry
-    call kmain
+    # Pass the raw multiboot2 info pointer to the C parser
+    movq mb2_info_ptr, %rdi
+    call mb2_init
 
 .hang64:
     hlt
