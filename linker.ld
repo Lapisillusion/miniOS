@@ -1,13 +1,16 @@
 /*
- * linker.ld — Kernel linker script for miniOS (x86_64)
+ * linker.ld — Kernel linker script for miniOS (x86_64) — Multiboot2 path
  *
  * Layout:
- *   .multiboot  @ 1M    (Multiboot2 header)
- *   .text32      @ +4K   (32-bit bootstrap code)
- *   .text        @ +4K   (64-bit kernel text)
- *   .rodata              (read-only data)
- *   .data                (initialised data)
- *   .bss                 (zero-initialised data, page tables, stack)
+ *   .multiboot  @ 1M          (Multiboot2 header — MUST be first)
+ *   .text32      @ 1M + 4K     (32-bit bootstrap code)
+ *   .text        @ 1M + 8K     (64-bit kernel text)
+ *   .rodata                    (read-only data)
+ *   .data                      (initialised data)
+ *   .bss                       (zero-initialised data, page tables, stack)
+ *
+ * All sections are folded into a single .text output section so the
+ * linker does not drop the small bootstrap sections.
  */
 
 ENTRY(_start)
@@ -18,18 +21,15 @@ SECTIONS
 {
     . = 1M;
 
-    /* ---- Multiboot2 header (must be < 32 KiB into the file) ---- */
-    .multiboot : ALIGN(8) {
+    .text BLOCK(4K) : ALIGN(4K) {
+        /* Multiboot2 header — must stay within the first 32 KiB */
         KEEP(*(.multiboot))
-    }
 
-    /* ---- 32-bit bootstrap code ---- */
-    .text32 : ALIGN(4K) {
+        /* 32-bit bootstrap (entry point) */
+        . = ALIGN(4K);
         *(.text32)
-    }
 
-    /* ---- 64-bit kernel text ---- */
-    .text : ALIGN(4K) {
+        /* 64-bit kernel */
         _text_start = .;
         *(.text .text.*)
         _text_end = .;

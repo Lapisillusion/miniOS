@@ -6,13 +6,27 @@
 
 #include <drivers/vga.h>
 #include <miniOS/types.h>
+#include <asm/io.h>
 
-#define VGA_MEMORY  ((volatile u16 *)0xB8000)
+#define VGA_MEMORY      ((volatile u16 *)0xB8000)
+#define VGA_CRTC_INDEX  0x3D4
+#define VGA_CRTC_DATA   0x3D5
 
 static size_t  vga_row;
 static size_t  vga_column;
 static u8      vga_color;
 static volatile u16 *vga_buffer = VGA_MEMORY;
+
+/* ---- private: update the hardware cursor ------------------------------ */
+static void vga_update_cursor(void)
+{
+    u16 pos = (u16)(vga_row * VGA_WIDTH + vga_column);
+
+    outb(VGA_CRTC_INDEX, 14);          /* cursor high byte */
+    outb(VGA_CRTC_DATA,  (u8)((pos >> 8) & 0xFF));
+    outb(VGA_CRTC_INDEX, 15);          /* cursor low byte  */
+    outb(VGA_CRTC_DATA,  (u8)(pos & 0xFF));
+}
 
 void vga_init(void)
 {
@@ -38,6 +52,7 @@ void vga_clear(void)
     }
     vga_row    = 0;
     vga_column = 0;
+    vga_update_cursor();
 }
 
 void vga_scroll(void)
@@ -85,6 +100,8 @@ void vga_putchar(char c)
         vga_row    = VGA_HEIGHT - 1;
         vga_column = 0;
     }
+
+    vga_update_cursor();
 }
 
 void vga_write(const char *data, size_t size)

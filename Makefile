@@ -45,8 +45,12 @@ AFLAGS := -nostdinc -nostdlib --gdwarf-2
 # ---------------------------------------------------------------------------
 CORE_C_OBJS := \
     init/main.o \
+    init/start_kernel.o \
     drivers/vga/vga.o \
-    drivers/serial/serial.o
+    drivers/serial/serial.o \
+    lib/vsprintf.o \
+    lib/printf.o \
+    lib/assert.o
 
 # ---------------------------------------------------------------------------
 # Boot-method-specific objects and flags

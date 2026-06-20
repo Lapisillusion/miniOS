@@ -226,11 +226,13 @@ miniOS/
 - [x] **里程碑: Multiboot2 引导信息完整解析**
 
 ### Phase 2: 终端与调试输出
-- [ ] `drivers/vga/vga.c` — VGA 文本模式 (80x25)
-- [ ] `drivers/serial/serial.c` — 串口 COM1 (0x3F8)
-- [ ] `lib/printf.c` — 基础格式化输出
-- [ ] `init/start_kernel.c` — 子系统初始化序列
-- [ ] **里程碑: 完整的终端输出和调试能力**
+- [x] `drivers/vga/vga.c` — VGA 文本模式 (80x25) + 硬件光标
+- [x] `drivers/serial/serial.c` — 串口 COM1 (0x3F8)
+- [x] `lib/vsprintf.c` — 格式化核心 (%s %d %u %x %p %lld %llu %llx)
+- [x] `lib/printf.c` — kprintf / kputs（双路输出到 VGA + Serial）
+- [x] `lib/assert.c` — kpanic / kassert（带源码位置）
+- [x] `init/start_kernel.c` — 子系统初始化序列
+- [x] **里程碑: 完整的终端输出和调试能力**
 
 ### Phase 3: 中断系统
 - [ ] `arch/x86_64/kernel/idt.c` — IDT 初始化
