@@ -235,12 +235,13 @@ miniOS/
 - [x] **里程碑: 完整的终端输出和调试能力**
 
 ### Phase 3: 中断系统
-- [ ] `arch/x86_64/kernel/idt.c` — IDT 初始化
-- [ ] `arch/x86_64/kernel/isr.c` + `isr_handlers.s` — 异常 ISR
-- [ ] `arch/x86_64/kernel/irq.c` — 8259 PIC 重映射 + IRQ 分发
-- [ ] `drivers/timer/pit.c` — PIT 定时器
-- [ ] `drivers/keyboard/keyboard.c` — PS/2 键盘
-- [ ] **里程碑: 可捕获异常，定时器滴答，按键响应**
+- [x] `arch/x86_64/kernel/idt.c` — IDT 初始化 (256 门描述符, 64-bit 格式)
+- [x] `arch/x86_64/kernel/isr_handlers.s` — 32 异常 + 16 IRQ 汇编存根（宏生成）
+- [x] `arch/x86_64/kernel/isr.c` — 异常分发器（打印寄存器/错误码/CR2）
+- [x] `arch/x86_64/kernel/irq.c` — 8259 PIC 重映射 (master 0x20, slave 0x28) + IRQ 注册框架
+- [x] `drivers/timer/pit.c` — PIT 8253 定时器 100Hz + tick 计数器
+- [x] `drivers/keyboard/keyboard.c` — PS/2 键盘 IRQ1, scancode set-1 → ASCII
+- [x] **里程碑: 可捕获异常，定时器滴答，按键响应**
 
 ### Phase 4: 物理内存管理
 - [ ] `mm/pmm.c` — 位图物理页分配器

@@ -48,9 +48,17 @@ CORE_C_OBJS := \
     init/start_kernel.o \
     drivers/vga/vga.o \
     drivers/serial/serial.o \
+    drivers/timer/pit.o \
+    drivers/keyboard/keyboard.o \
+    arch/x86_64/kernel/idt.o \
+    arch/x86_64/kernel/isr.o \
+    arch/x86_64/kernel/irq.o \
     lib/vsprintf.o \
     lib/printf.o \
     lib/assert.o
+
+CORE_ASM_OBJS := \
+    arch/x86_64/kernel/isr_handlers.o
 
 # ---------------------------------------------------------------------------
 # Boot-method-specific objects and flags
@@ -69,7 +77,7 @@ else ifeq ($(BOOT_METHOD),uefi)
     $(error UEFI boot not yet implemented)
 endif
 
-OBJS := $(BOOT_ASM_OBJS) $(BOOT_C_OBJS) $(CORE_C_OBJS)
+OBJS := $(BOOT_ASM_OBJS) $(BOOT_C_OBJS) $(CORE_C_OBJS) $(CORE_ASM_OBJS)
 
 LDFLAGS := -nostdlib -T $(LDSCRIPT) -z max-page-size=0x1000
 
@@ -150,6 +158,10 @@ disk: disk.img
 # ISO image  (Multiboot2 only)
 # ---------------------------------------------------------------------------
 iso: kernel.elf
+	@grub-file --is-x86-multiboot2 kernel.elf || \
+		(echo "ERROR: kernel.elf is not a valid Multiboot2 kernel."; \
+		 echo "  Run 'make clean' then 'make BOOT_METHOD=multiboot2 iso'."; \
+		 exit 1)
 	@mkdir -p isodir/boot/grub
 	cp kernel.elf isodir/boot/kernel.elf
 	cp scripts/grub.cfg isodir/boot/grub/grub.cfg
@@ -213,5 +225,6 @@ clean:
 	rm -rf kernel.elf kernel.bin miniOS.iso disk.img isodir
 	rm -f arch/x86_64/boot/bios/mbr.bin
 	rm -f arch/x86_64/boot/bios/stage2.bin
+	rm -f arch/x86_64/boot/bios/head64.o
 	find . -name '*.o' -delete
 	@echo "  [CLEAN] done"

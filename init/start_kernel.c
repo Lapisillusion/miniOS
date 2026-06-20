@@ -1,17 +1,22 @@
 /*
  * init/start_kernel.c — Subsystem initialisation sequence.
  *
- * Called by kmain() once the boot-method-specific init has filled out
- * the boot_info_t.  This function brings up subsystems in dependency
- * order and then (for now) halts.
+ * Called by kmain() with a populated boot_info_t.
+ * Brings up every subsystem in dependency order.
  */
 
 #include <miniOS/types.h>
 #include <miniOS/boot_info.h>
 #include <drivers/vga.h>
 #include <drivers/serial.h>
+#include <drivers/pit.h>
+#include <drivers/keyboard.h>
 #include <lib/printf.h>
 #include <lib/assert.h>
+
+/* Declared in arch/x86_64/kernel/ */
+extern void idt_init(void);
+extern void irq_init(void);
 
 static void count_memory(boot_info_t *info)
 {
@@ -38,7 +43,7 @@ static void count_memory(boot_info_t *info)
 void start_kernel(boot_info_t *info)
 {
     /*
-     * 1. Debug lifeline first — serial can work even when VGA is dead.
+     * 1. Debug lifeline — must come before anything that can crash.
      */
     serial_init();
 
@@ -74,12 +79,36 @@ void start_kernel(boot_info_t *info)
     count_memory(info);
 
     /*
-     * 6. All subsystems ready.
+     * 6. Interrupt subsystem — IDT, ISR stubs, PIC.
+     */
+    idt_init();
+    irq_init();
+
+    /*
+     * 7. Peripherals that rely on IRQs.
+     */
+    pit_init(100);          /* 100 Hz scheduler tick */
+    keyboard_init();        /* PS/2 keyboard on IRQ1 */
+
+    /*
+     * 8. All subsystems ready.
      */
     kprintf("[ OK ] Kernel entered 64-bit long mode successfully.\n");
-    kprintf("=== Kernel halted ===\n");
+    kprintf("=== Kernel running — interrupts enabled ===\n");
 
-    /* Spin.  Phase 3 will add the interrupt-driven idle loop. */
-    while (1)
+    /* Enable interrupts.  From this point on, hlt will be woken by PIT. */
+    __asm__ volatile ("sti");
+
+    /*
+     * Idle loop — tick counter increments in the background.
+     * Every ~5 s we print a heartbeat so we know interrupts are alive.
+     */
+    u64 last = 0;
+    while (1) {
         __asm__ volatile ("hlt");
+        if (g_tick - last >= 500) {
+            kprintf("[tick %llu] ", g_tick);
+            last = g_tick;
+        }
+    }
 }
