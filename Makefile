@@ -55,7 +55,8 @@ CORE_C_OBJS := \
     arch/x86_64/kernel/irq.o \
     lib/vsprintf.o \
     lib/printf.o \
-    lib/assert.o
+    lib/assert.o \
+    mm/pmm.o
 
 CORE_ASM_OBJS := \
     arch/x86_64/kernel/isr_handlers.o

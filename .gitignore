@@ -6,6 +6,9 @@ isodir/
 *.bin
 *img
 *.so
+*.log
+*.EFI
+
 
 # Editor temp files
 *.swp
