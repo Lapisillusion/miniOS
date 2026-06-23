@@ -30,8 +30,8 @@ void kvprintf(const char *fmt, __builtin_va_list args)
         : "=m"(flags) :: "memory"
     );
     vsnprintf(buf, sizeof(buf), fmt, args);
-    serial_puts(buf);
     vga_puts(buf);
+    serial_puts(buf);
     __asm__ volatile (
         "pushq %0\n\t"
         "popfq"

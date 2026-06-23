@@ -31,8 +31,13 @@ void serial_init(void)
     /* Enable FIFO, clear them, 14-byte threshold */
     outb(COM1_BASE + 2, 0xC7);
 
-    /* Disable hardware flow control (RTS/CTS), set DTR+RTS low */
-    outb(COM1_BASE + 4, 0x00);
+    /* Assert DTR+RTS, disable loopback.
+     * After UEFI the UART may need DTR/RTS high to transmit. */
+    outb(COM1_BASE + 4, 0x03);
+
+    /* Drain any garbage left in the RX FIFO */
+    while (inb(COM1_BASE + 5) & 1)
+        inb(COM1_BASE);
 }
 
 static int serial_tx_empty(void)
@@ -42,11 +47,15 @@ static int serial_tx_empty(void)
 
 void serial_putchar(char c)
 {
-    /* Wait for the transmit buffer to be empty */
-    while (!serial_tx_empty())
-        ;
+    /* Wait for TX empty with a timeout.
+     * After UEFI ExitBootServices the UART may be in a state where
+     * TX never becomes ready; the timeout prevents a permanent hang. */
+    int timeout = 10000000;
+    while (!serial_tx_empty() && --timeout)
+        __asm__ volatile ("pause");
 
-    outb(COM1_BASE, (u8)c);
+    if (timeout)
+        outb(COM1_BASE, (u8)c);
 
     /* CR → CR+LF for terminal friendliness */
     if (c == '\n')

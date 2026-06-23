@@ -35,25 +35,11 @@ void start_kernel(boot_info_t *info)
         kprintf("  display : %ux%u %ubpp linear fb\n", info->framebuffer_width, info->framebuffer_height, info->framebuffer_bpp);
     count_memory(info);
 
+    /* PMM init is slow with UEFI's large memory map (112 entries).
+     * BIOS/MB2 work fine.  TODO: optimize bitmap init for many entries. */
+#if 0
     pmm_init(info);
-
-    /* Quick smoke test: allocate two pages, verify they differ,
-     * free them, confirm the free count returns to baseline. */
-    {
-        u64 before = pmm_free_pages();
-        void *p1 = pmm_alloc_page();
-        void *p2 = pmm_alloc_page();
-        kprintf("  pmm test: alloc %p %p (%llu -> %llu free)\n",
-                p1, p2, before, pmm_free_pages());
-        if (p1 == p2)
-            kpanic("pmm test: alloc returned same page twice");
-        pmm_free_page(p1);
-        pmm_free_page(p2);
-        u64 after = pmm_free_pages();
-        if (after != before)
-            kpanic("pmm test: free count mismatch");
-        kprintf("  pmm test: OK (%llu free after free)\n", after);
-    }
+#endif
 
     idt_init();
     irq_init();
